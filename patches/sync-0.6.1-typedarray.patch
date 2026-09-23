@@ -1,0 +1,63 @@
+diff --git a/bindings/javascript/sync/packages/common/run.ts b/bindings/javascript/sync/packages/common/run.ts
+--- a/bindings/javascript/sync/packages/common/run.ts
++++ b/bindings/javascript/sync/packages/common/run.ts
+@@ -49,7 +49,7 @@ async function process(opts: RunOpts, io: ProtocolIo, request: any) {
+             const response = await fetchImpl(`${url}${requestType.path}`, {
+                 method: requestType.method,
+                 headers: headers,
+-                body: requestType.body != null ? new Uint8Array(requestType.body) : null,
++                body: requestType.body ?? null,
+             });
+             completion.status(response.status);
+             const reader = response.body?.getReader();
+diff --git a/bindings/javascript/sync/packages/native/index.d.ts b/bindings/javascript/sync/packages/native/index.d.ts
+--- a/bindings/javascript/sync/packages/native/index.d.ts
++++ b/bindings/javascript/sync/packages/native/index.d.ts
+@@ -274,7 +274,7 @@ export interface JsPartialSyncOpts {
+ }
+
+ export type JsProtocolRequest =
+-  | { type: 'Http', url?: string, method: string, path: string, body?: Array<number>, headers: Array<[string, string]> }
++  | { type: 'Http', url?: string, method: string, path: string, body?: Uint8Array, headers: Array<[string, string]> }
+   | { type: 'FullRead', path: string }
+-  | { type: 'FullWrite', path: string, content: Array<number> }
++  | { type: 'FullWrite', path: string, content: Uint8Array }
+   | { type: 'Transform', mutations: Array<DatabaseRowMutationJs> }
+diff --git a/bindings/javascript/sync/src/js_protocol_io.rs b/bindings/javascript/sync/src/js_protocol_io.rs
+--- a/bindings/javascript/sync/src/js_protocol_io.rs
++++ b/bindings/javascript/sync/src/js_protocol_io.rs
+@@ -23,7 +23,7 @@ pub enum JsProtocolRequest {
+         url: Option<String>,
+         method: String,
+         path: String,
+-        body: Option<Vec<u8>>,
++        body: Option<Uint8Array>,
+         headers: Vec<(String, String)>,
+     },
+     FullRead {
+@@ -31,7 +31,7 @@ pub enum JsProtocolRequest {
+     },
+     FullWrite {
+         path: String,
+-        content: Vec<u8>,
++        content: Uint8Array,
+     },
+     Transform {
+         mutations: Vec<DatabaseRowMutationJs>,
+@@ -200,7 +200,7 @@ impl SyncEngineIo for JsProtocolIo {
+             url: url.map(|x| x.to_string()),
+             method: method.to_string(),
+             path: path.to_string(),
+-            body,
++            body: body.map(Uint8Array::from),
+             headers: headers
+                 .iter()
+                 .map(|x| (x.0.to_string(), x.1.to_string()))
+@@ -221,6 +221,6 @@ impl SyncEngineIo for JsProtocolIo {
+     ) -> turso_sync_engine::Result<Self::DataCompletionBytes> {
+         Ok(self.add_request(JsProtocolRequest::FullWrite {
+             path: path.to_string(),
+-            content,
++            content: Uint8Array::from(content),
+         }))
+     }
