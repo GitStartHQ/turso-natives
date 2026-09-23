@@ -84,16 +84,33 @@ jobs:
 
       - name: Build native sync binding
         working-directory: turso/bindings/javascript/sync/packages/native
+        env:
+          BUILD_TARGET: ${{ matrix.target }}
         run: |
+          cross_args=()
+          if [[ "$BUILD_TARGET" == *-linux-gnu ]]; then
+            # The runner's glibc is newer than the Machine's Node >=22 floor.
+            # NAPI's pinned cross-toolchain targets an older glibc baseline.
+            cross_args+=(--use-napi-cross)
+          fi
           ../../../node_modules/.bin/napi build \
             --platform \
-            --target ${{ matrix.target }} \
+            --target "$BUILD_TARGET" \
+            "${cross_args[@]}" \
             --profile release-official \
             --esm \
             --manifest-path ../../Cargo.toml \
             --output-dir .
           test -s sync.${{ matrix.suffix }}.node
           file sync.${{ matrix.suffix }}.node
+          if [[ "$BUILD_TARGET" == *-linux-gnu ]]; then
+            required_glibc="$(readelf --version-info sync.${{ matrix.suffix }}.node | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -Vu | tail -n 1)"
+            if [[ -z "$required_glibc" || "$(printf '%s\n' "$required_glibc" GLIBC_2.28 | sort -V | tail -n 1)" != GLIBC_2.28 ]]; then
+              echo "::error::Linux native requires ${required_glibc:-unknown glibc}; Node >=22 supports glibc 2.28 and newer"
+              exit 1
+            fi
+            echo "Linux native maximum required glibc symbol: $required_glibc"
+          fi
 
       - name: Pack and smoke-test native package
         run: |
