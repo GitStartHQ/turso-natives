@@ -19,3 +19,13 @@ against a disposable hosted Turso database, a same-file patched-to-stock
 has a 223 MB pending transaction and over 1 GB of CDC backlog. The native
 memory fix alone does not prove that hosted Turso accepts the request or that
 the remaining backlog drains. Never delete or rewrite its CDC ledger.
+
+On 2026-09-23, the hosted acceptance test passed against the disposable
+`ziahamza/gitenv` database `gitenv-cdc-qa-20260923`: the patched binding sent a
+257,399,528-byte request and Turso returned HTTP 200. Stock 0.6.1 reopened
+the same replica and read all 44,359 rows. An independent Turso Cloud query
+also returned 44,359 rows and 181,690,369 payload bytes. Run
+`scripts/smoke-hosted-large-sync.mjs` with stock and patched npm prefixes and
+`TURSO_HOSTED_QA_URL` / `TURSO_HOSTED_QA_TOKEN` to repeat it. This proves hosted
+request acceptance and format rollback, not production Catalog convergence or
+the absence of replica 502s. Keep this PR draft until those are verified.
