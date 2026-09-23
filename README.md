@@ -6,9 +6,11 @@ Prebuilt Turso (libSQL) native N-API packages for platforms upstream doesn't pub
 The `build-sync-061-typedarray.yml` workflow builds all five GitEnv Machine
 platforms from the pinned Turso 0.6.1 source commit. Its patch changes only
 the JavaScript sync request byte boundary: N-API now returns a `Uint8Array`
-instead of an array of one JavaScript number per byte. It does not change the
-database engine, sync protocol, or on-disk format. Every package retains the
-upstream `0.6.1` version so the existing loader accepts it.
+instead of an array of one JavaScript number per byte. The matching
+`sync-common` change passes that byte array to `fetch` without a second copy.
+It does not change the database engine, sync protocol, or on-disk format.
+Every package retains the upstream `0.6.1` version so the existing loader
+accepts it.
 
 The workflow uploads test artifacts only. Do not publish or use them in a
 Machine release until the following checks pass: one large transaction push
