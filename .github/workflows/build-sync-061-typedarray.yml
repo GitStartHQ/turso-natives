@@ -1,0 +1,165 @@
+name: Build patched Turso Sync 0.6.1 bindings
+
+on:
+  pull_request:
+    paths:
+      - .gitattributes
+      - .github/workflows/build-sync-061-typedarray.yml
+      - patches/sync-0.6.1-typedarray.patch
+      - scripts/prepare-sync-package.mjs
+      - scripts/smoke-large-sync.mjs
+      - scripts/smoke-hosted-large-sync.mjs
+      - scripts/smoke-sync.mjs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            suffix: linux-x64-gnu
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            suffix: linux-arm64-gnu
+          - runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            suffix: win32-x64-msvc
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            suffix: darwin-arm64
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            suffix: darwin-x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Preserve LF source and patch files
+        run: git config --global core.autocrlf false
+
+      - name: Check out backport
+        uses: actions/checkout@v4
+        with:
+          path: natives
+          persist-credentials: false
+
+      - name: Check out pinned Turso 0.6.1 source
+        uses: actions/checkout@v4
+        with:
+          repository: tursodatabase/turso
+          ref: 76af5a1250cd98bb26c13862093a638714b0a3a6
+          path: turso
+          persist-credentials: false
+
+      - name: Apply the three-file N-API backport
+        run: |
+          git -C turso apply --check ../natives/patches/sync-0.6.1-typedarray.patch
+          git -C turso apply ../natives/patches/sync-0.6.1-typedarray.patch
+          git -C turso diff --check
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install JavaScript build dependencies
+        working-directory: turso/bindings/javascript
+        run: node .yarn/releases/yarn-4.9.2.cjs install --immutable
+
+      - name: Build matching sync-common package
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        working-directory: turso/bindings/javascript/sync/packages/common
+        run: |
+          npm run tsc-build
+          npm pack . --pack-destination "$RUNNER_TEMP"
+          test -s "$RUNNER_TEMP/tursodatabase-sync-common-0.6.1.tgz"
+
+      - name: Build native sync binding
+        working-directory: turso/bindings/javascript/sync/packages/native
+        env:
+          BUILD_TARGET: ${{ matrix.target }}
+        run: |
+          cross_args=()
+          if [[ "$BUILD_TARGET" == *-linux-gnu ]]; then
+            # The runner's glibc is newer than the Machine's Node >=22 floor.
+            # NAPI's pinned cross-toolchain targets an older glibc baseline.
+            cross_args+=(--use-napi-cross)
+          fi
+          ../../../node_modules/.bin/napi build \
+            --platform \
+            --target "$BUILD_TARGET" \
+            "${cross_args[@]}" \
+            --profile release-official \
+            --esm \
+            --manifest-path ../../Cargo.toml \
+            --output-dir .
+          test -s sync.${{ matrix.suffix }}.node
+          file sync.${{ matrix.suffix }}.node
+          if [[ "$BUILD_TARGET" == *-linux-gnu ]]; then
+            required_glibc="$(readelf --version-info sync.${{ matrix.suffix }}.node | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -Vu | tail -n 1)"
+            if [[ -z "$required_glibc" || "$(printf '%s\n' "$required_glibc" GLIBC_2.28 | sort -V | tail -n 1)" != GLIBC_2.28 ]]; then
+              echo "::error::Linux native requires ${required_glibc:-unknown glibc}; Node >=22 supports glibc 2.28 and newer"
+              exit 1
+            fi
+            echo "Linux native maximum required glibc symbol: $required_glibc"
+          fi
+
+      - name: Pack and smoke-test native package
+        run: |
+          package_dir="$RUNNER_TEMP/package-${{ matrix.suffix }}"
+          package_file="$RUNNER_TEMP/tursodatabase-sync-${{ matrix.suffix }}-0.6.1.tgz"
+          node natives/scripts/prepare-sync-package.mjs \
+            '${{ matrix.target }}' \
+            "turso/bindings/javascript/sync/packages/native/sync.${{ matrix.suffix }}.node" \
+            "$package_dir"
+          npm pack "$package_dir" --pack-destination "$RUNNER_TEMP"
+          test -s "$package_file"
+          mkdir -p "$RUNNER_TEMP/smoke"
+          packages=('@tursodatabase/sync@0.6.1' "$package_file")
+          if [[ '${{ matrix.target }}' == 'x86_64-unknown-linux-gnu' ]]; then
+            packages+=("$RUNNER_TEMP/tursodatabase-sync-common-0.6.1.tgz")
+          fi
+          npm install --prefix "$RUNNER_TEMP/smoke" --no-save --ignore-scripts "${packages[@]}"
+          cp natives/scripts/smoke-sync.mjs "$RUNNER_TEMP/smoke/smoke-sync.mjs"
+          node "$RUNNER_TEMP/smoke/smoke-sync.mjs"
+          node -e 'const fs=require("node:fs"); const crypto=require("node:crypto"); const path=process.argv[1]; const hash=crypto.createHash("sha256").update(fs.readFileSync(path)).digest("hex"); fs.writeFileSync(path+".sha256", hash+"  "+path.split(/[\\/]/).pop()+"\n")' "$package_file"
+
+      - name: Test large sync transaction and stock 0.6.1 rollback
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          archive="$RUNNER_TEMP/turso_cli-x86_64-unknown-linux-gnu.tar.xz"
+          curl --retry 3 -fsSL \
+            https://github.com/tursodatabase/turso/releases/download/v0.6.1/turso_cli-x86_64-unknown-linux-gnu.tar.xz \
+            -o "$archive"
+          actual_hash="$(sha256sum "$archive" | cut -d ' ' -f 1)"
+          test "$actual_hash" = b574d448434d1e256ceacc000d1a94eaf6d0e858f503104be73711ffd727de7f
+          tar -xJf "$archive" -C "$RUNNER_TEMP"
+          npm install --prefix "$RUNNER_TEMP/stock" --no-save --ignore-scripts @tursodatabase/sync@0.6.1
+          timeout 240s node natives/scripts/smoke-large-sync.mjs \
+            "$RUNNER_TEMP/stock" "$RUNNER_TEMP/smoke" \
+            "$RUNNER_TEMP/turso_cli-x86_64-unknown-linux-gnu/tursodb"
+
+      - name: Upload unsigned test artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: turso-sync-061-typedarray-${{ matrix.suffix }}
+          path: |
+            ${{ runner.temp }}/tursodatabase-sync-${{ matrix.suffix }}-0.6.1.tgz
+            ${{ runner.temp }}/tursodatabase-sync-${{ matrix.suffix }}-0.6.1.tgz.sha256
+          if-no-files-found: error
+
+      - name: Upload matching sync-common test artifact
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        uses: actions/upload-artifact@v4
+        with:
+          name: turso-sync-061-typedarray-common
+          path: ${{ runner.temp }}/tursodatabase-sync-common-0.6.1.tgz
+          if-no-files-found: error
