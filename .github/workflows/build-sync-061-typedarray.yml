@@ -3,10 +3,12 @@ name: Build patched Turso Sync 0.6.1 bindings
 on:
   pull_request:
     paths:
+      - .gitattributes
       - .github/workflows/build-sync-061-typedarray.yml
       - patches/sync-0.6.1-typedarray.patch
       - scripts/prepare-sync-package.mjs
       - scripts/smoke-large-sync.mjs
+      - scripts/smoke-hosted-large-sync.mjs
       - scripts/smoke-sync.mjs
   workflow_dispatch:
 

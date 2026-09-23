@@ -69,7 +69,7 @@ try {
     'SELECT count(*) AS rowCount, sum(length(payload)) AS payloadBytes FROM probe',
   )).all();
   const result = rows[0];
-  if (rowCount === 44358 && maxRequestBytes <= 223_000_000) {
+  if (maxRequestBytes <= 223_000_000) {
     throw new Error(`large sync request was too small: ${maxRequestBytes} bytes`);
   }
   if (result?.rowCount !== rowCount + 1 ||
