@@ -6,6 +6,7 @@ on:
       - .github/workflows/build-sync-061-typedarray.yml
       - patches/sync-0.6.1-typedarray.patch
       - scripts/prepare-sync-package.mjs
+      - scripts/smoke-large-sync.mjs
       - scripts/smoke-sync.mjs
   workflow_dispatch:
 
@@ -111,6 +112,21 @@ jobs:
           cp natives/scripts/smoke-sync.mjs "$RUNNER_TEMP/smoke/smoke-sync.mjs"
           node "$RUNNER_TEMP/smoke/smoke-sync.mjs"
           node -e 'const fs=require("node:fs"); const crypto=require("node:crypto"); const path=process.argv[1]; const hash=crypto.createHash("sha256").update(fs.readFileSync(path)).digest("hex"); fs.writeFileSync(path+".sha256", hash+"  "+path.split(/[\\/]/).pop()+"\n")' "$package_file"
+
+      - name: Test large sync transaction and stock 0.6.1 rollback
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          archive="$RUNNER_TEMP/turso_cli-x86_64-unknown-linux-gnu.tar.xz"
+          curl --retry 3 -fsSL \
+            https://github.com/tursodatabase/turso/releases/download/v0.6.1/turso_cli-x86_64-unknown-linux-gnu.tar.xz \
+            -o "$archive"
+          actual_hash="$(sha256sum "$archive" | cut -d ' ' -f 1)"
+          test "$actual_hash" = b574d448434d1e256ceacc000d1a94eaf6d0e858f503104be73711ffd727de7f
+          tar -xJf "$archive" -C "$RUNNER_TEMP"
+          npm install --prefix "$RUNNER_TEMP/stock" --no-save --ignore-scripts @tursodatabase/sync@0.6.1
+          timeout 240s node natives/scripts/smoke-large-sync.mjs \
+            "$RUNNER_TEMP/stock" "$RUNNER_TEMP/smoke" \
+            "$RUNNER_TEMP/turso_cli-x86_64-unknown-linux-gnu/tursodb"
 
       - name: Upload unsigned test artifact
         uses: actions/upload-artifact@v4
