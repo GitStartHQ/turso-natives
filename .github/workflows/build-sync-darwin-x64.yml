@@ -1,0 +1,71 @@
+name: Build Turso Sync macOS x64 native package
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/build-sync-darwin-x64.yml
+      - packages/sync-darwin-x64/package.json
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15-intel
+    timeout-minutes: 90
+    steps:
+      - name: Check out package metadata
+        uses: actions/checkout@v4
+        with:
+          path: natives
+          persist-credentials: false
+
+      - name: Check out pinned Turso source
+        uses: actions/checkout@v4
+        with:
+          repository: tursodatabase/turso
+          ref: 7cc973fbe3edf4c07b1e06cf8f43266c1e873bbd
+          path: turso
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install JavaScript build dependencies
+        working-directory: turso/bindings/javascript
+        run: node .yarn/releases/yarn-4.9.2.cjs install --immutable
+
+      - name: Build the x64 sync binding
+        working-directory: turso/bindings/javascript/sync/packages/native
+        run: |
+          ../../../node_modules/.bin/napi build \
+            --target x86_64-apple-darwin \
+            --profile release-official \
+            --esm \
+            --manifest-path ../../Cargo.toml \
+            --output-dir .
+          test -s sync.darwin-x64.node
+          file sync.darwin-x64.node
+
+      - name: Pack and inspect package
+        run: |
+          mkdir -p "$RUNNER_TEMP/turso-sync-darwin-x64"
+          cp natives/packages/sync-darwin-x64/package.json "$RUNNER_TEMP/turso-sync-darwin-x64/package.json"
+          cp turso/bindings/javascript/sync/packages/native/sync.darwin-x64.node "$RUNNER_TEMP/turso-sync-darwin-x64/sync.darwin-x64.node"
+          cd "$RUNNER_TEMP/turso-sync-darwin-x64"
+          npm pack --pack-destination "$RUNNER_TEMP"
+          tar -tzf "$RUNNER_TEMP/tursodatabase-sync-darwin-x64-0.8.0-pre.11.tgz"
+          shasum -a 256 "$RUNNER_TEMP/tursodatabase-sync-darwin-x64-0.8.0-pre.11.tgz" \
+            > "$RUNNER_TEMP/tursodatabase-sync-darwin-x64-0.8.0-pre.11.tgz.sha256"
+
+      - name: Upload unsigned build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: turso-sync-darwin-x64-0.8.0-pre.11
+          path: |
+            ${{ runner.temp }}/tursodatabase-sync-darwin-x64-0.8.0-pre.11.tgz
+            ${{ runner.temp }}/tursodatabase-sync-darwin-x64-0.8.0-pre.11.tgz.sha256
+          if-no-files-found: error
