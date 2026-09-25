@@ -1,0 +1,13 @@
+{
+  "name": "@tursodatabase/sync-darwin-x64",
+  "version": "0.8.0-pre.11",
+  "cpu": ["x64"],
+  "main": "sync.darwin-x64.node",
+  "files": ["sync.darwin-x64.node"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tursodatabase/turso"
+  },
+  "os": ["darwin"]
+}
